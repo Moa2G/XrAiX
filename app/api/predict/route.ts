@@ -10,9 +10,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No image provided' }, { status: 400 })
     }
 
-    // 1. Define your Hugging Face API URL 
-    // REPLACE THIS with your actual Hugging Face Direct URL!
-    const HUGGING_FACE_URL = "https://yuofo-xraix.hf.space/predict";
+    // 1. Define your Hugging Face API URL from environment variable
+    const HUGGING_FACE_URL = process.env.HUGGING_FACE_URL;
+    if (!HUGGING_FACE_URL) {
+      return NextResponse.json({ error: 'HUGGING_FACE_URL is not configured' }, { status: 500 })
+    }
 
     // 2. We use FormData directly as FastAPI expects 'file' (v0 uses 'image', so we append it)
     const backendFormData = new FormData();
