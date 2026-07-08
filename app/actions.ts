@@ -148,3 +148,41 @@ export async function logAnalysisHistory(history: {
   if (error) throw error
   return data
 }
+
+export async function getAllUsers() {
+  const session = await getSessionUser()
+  if (!session || (session.profile as any)?.role !== 'admin') {
+    throw new Error('Unauthorized')
+  }
+  const supabaseAdmin = await createAdminClient()
+  const { data, error } = await supabaseAdmin.from('users').select('*')
+  if (error) throw error
+  return data
+}
+
+export async function updateDoctorAccount(id: string, updates: { name: string, role: 'admin' | 'doctor' }) {
+  const session = await getSessionUser()
+  if (!session || (session.profile as any)?.role !== 'admin') {
+    throw new Error('Unauthorized')
+  }
+  const supabaseAdmin = await createAdminClient()
+  // @ts-ignore - Supabase generic inference resolves Update to never; runtime is correct
+  const { error } = await supabaseAdmin.from('users').update(updates).eq('id', id)
+  if (error) throw error
+  return { success: true }
+}
+
+export async function deleteDoctorAccount(id: string) {
+  const session = await getSessionUser()
+  if (!session || (session.profile as any)?.role !== 'admin') {
+    throw new Error('Unauthorized')
+  }
+  const supabaseAdmin = await createAdminClient()
+  
+  const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(id)
+  if (authError) throw authError
+  
+  await supabaseAdmin.from('users').delete().eq('id', id)
+
+  return { success: true }
+}
