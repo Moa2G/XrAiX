@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import imagekit from '@/lib/imagekit'
 
 export async function POST(request: NextRequest) {
   try {
@@ -16,18 +17,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'HUGGING_FACE_URL is not configured' }, { status: 500 })
     }
 
-    // 2. We use FormData directly as FastAPI expects 'file' (v0 uses 'image', so we append it)
-    const backendFormData = new FormData();
-    backendFormData.append('file', image);
-    if (targetDisease) {
-        backendFormData.append('target_disease', targetDisease);
-    }
+    // 2. Read the file bytes once upfront to avoid stream consumption issues
+    const arrayBuffer = await image.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
 
-    // 3. Forward the exact FormData directly to your FastAPI backend
-    const response = await fetch(HUGGING_FACE_URL, {
-      method: 'POST',
-      body: backendFormData,
-    });
+    // 3. Create FormData for backend with a fresh Blob from the buffer
+    const backendFormData = new FormData();
+    backendFormData.append('file', new Blob([buffer], { type: image.type || 'image/jpeg' }), image.name || 'xray.jpg');
+    if (targetDisease) {
+      backendFormData.append('target_disease', targetDisease);
+    }
+    
+    // 4. Forward to backend and upload to ImageKit concurrently
+    const [response, imageKitResult] = await Promise.all([
+      fetch(HUGGING_FACE_URL, {
+        method: 'POST',
+        body: backendFormData,
+      }),
+      imagekit.upload({
+        file: buffer,
+        fileName: `xray_${Date.now()}.jpg`,
+        folder: "/patient-xrays",
+      }).catch(err => {
+        console.error("ImageKit upload error:", err);
+        return { url: null };
+      })
+    ]);
 
     if (!response.ok) {
       throw new Error(`Backend responded with status: ${response.status}`);
@@ -41,15 +56,27 @@ export async function POST(request: NextRequest) {
     // The backend uses a text verdict, but v0 expects a boolean `predicted`.
     const mappedPredictions = backendData.predictions.map((p: any) => ({
       disease: p.disease,
-      confidence: p.probability / 100.0, 
-      predicted: p.verdict.includes("POSITIVE"), 
+      confidence: p.probability / 100.0,
+      predicted: p.verdict.includes("POSITIVE"),
+      threshold: p.threshold / 100.0,
     }));
+
+    // Map individual heatmaps to base64 Data URIs
+    const individualHeatmaps: Record<string, string> = {}
+    if (backendData.individual_heatmaps) {
+      for (const [modelName, base64] of Object.entries(backendData.individual_heatmaps)) {
+        individualHeatmaps[modelName] = `data:image/jpeg;base64,${base64}`
+      }
+    }
 
     return NextResponse.json({
       predictions: mappedPredictions,
       // Wrap the raw base64 string in the proper Data URI format for the browser to render
       gradcam_overlay: `data:image/jpeg;base64,${backendData.gradcam_base64}`,
       target_disease: targetDisease || null,
+      individual_heatmaps: individualHeatmaps,
+      individual_predictions: backendData.individual_predictions || {},
+      image_url: imageKitResult.url,
     })
 
   } catch (error) {
