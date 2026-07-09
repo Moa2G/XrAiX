@@ -6,6 +6,8 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData()
     const image = formData.get('image') as File
     const targetDisease = formData.get('target_disease') as string | null
+    const skipUpload = formData.get('skip_upload') === 'true'
+    const existingImageUrl = formData.get('existing_image_url') as string | null
 
     if (!image) {
       return NextResponse.json({ error: 'No image provided' }, { status: 400 })
@@ -28,20 +30,28 @@ export async function POST(request: NextRequest) {
       backendFormData.append('target_disease', targetDisease);
     }
     
-    // 4. Forward to backend and upload to ImageKit concurrently
-    const [response, imageKitResult] = await Promise.all([
-      fetch(HUGGING_FACE_URL, {
-        method: 'POST',
-        body: backendFormData,
-      }),
-      imagekit.upload({
+    // 4. Forward to backend. Conditionally upload to ImageKit (skip on rediagnose)
+    let imageKitPromise: Promise<{ url: string | null }>;
+    if (skipUpload && existingImageUrl) {
+      // Rediagnose: skip ImageKit upload, reuse existing URL
+      imageKitPromise = Promise.resolve({ url: existingImageUrl });
+    } else {
+      imageKitPromise = imagekit.upload({
         file: buffer,
         fileName: `xray_${Date.now()}.jpg`,
         folder: "/patient-xrays",
       }).catch(err => {
         console.error("ImageKit upload error:", err);
         return { url: null };
-      })
+      });
+    }
+
+    const [response, imageKitResult] = await Promise.all([
+      fetch(HUGGING_FACE_URL, {
+        method: 'POST',
+        body: backendFormData,
+      }),
+      imageKitPromise
     ]);
 
     if (!response.ok) {

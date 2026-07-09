@@ -106,7 +106,7 @@ export async function findPatientById(patientId: string) {
   return data
 }
 
-export async function createPatient(patient: { name: string; age: number; gender: string }) {
+export async function createPatient(patient: { name: string; age: number; gender: string; doctor_id?: string | null }) {
   const cookieStore = await cookies()
   const supabase = createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -147,6 +147,61 @@ export async function logAnalysisHistory(history: {
 
   if (error) throw error
   return data
+}
+
+export async function getPatientsList() {
+  const session = await getSessionUser()
+  if (!session) throw new Error('Unauthorized')
+
+  const supabaseAdmin = await createAdminClient()
+  const role = (session.profile as any)?.role
+
+  if (role === 'admin') {
+    const { data, error } = await supabaseAdmin.from('patients').select('*').order('created_at', { ascending: false })
+    if (error) throw error
+    return data
+  } else {
+    // Doctors see only their own patients + patients with NULL doctor_id are admin-only
+    const { data, error } = await supabaseAdmin.from('patients').select('*').eq('doctor_id', session.id).order('created_at', { ascending: false })
+    if (error) throw error
+    return data
+  }
+}
+
+export async function getRecentAnalyses() {
+  const session = await getSessionUser()
+  if (!session) throw new Error('Unauthorized')
+
+  const supabaseAdmin = await createAdminClient()
+  const role = (session.profile as any)?.role
+
+  if (role === 'admin') {
+    const { data, error } = await supabaseAdmin.from('history').select('*, patients(name)').order('created_at', { ascending: false }).limit(10)
+    if (error) throw error
+    return data
+  } else {
+    const { data, error } = await supabaseAdmin.from('history').select('*, patients(name)').eq('doctor_id', session.id).order('created_at', { ascending: false }).limit(10)
+    if (error) throw error
+    return data
+  }
+}
+
+export async function getAnalysisStats() {
+  const session = await getSessionUser()
+  if (!session) throw new Error('Unauthorized')
+
+  const supabaseAdmin = await createAdminClient()
+  const role = (session.profile as any)?.role
+
+  if (role === 'admin') {
+    const { count: total } = await supabaseAdmin.from('history').select('*', { count: 'exact', head: true })
+    const { count: abnormal } = await supabaseAdmin.from('history').select('*', { count: 'exact', head: true }).neq('top_finding', 'Normal')
+    return { total: total || 0, abnormal: abnormal || 0 }
+  } else {
+    const { count: total } = await supabaseAdmin.from('history').select('*', { count: 'exact', head: true }).eq('doctor_id', session.id)
+    const { count: abnormal } = await supabaseAdmin.from('history').select('*', { count: 'exact', head: true }).eq('doctor_id', session.id).neq('top_finding', 'Normal')
+    return { total: total || 0, abnormal: abnormal || 0 }
+  }
 }
 
 export async function getAllUsers() {

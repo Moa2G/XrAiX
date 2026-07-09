@@ -13,6 +13,7 @@ export interface Patient {
   name: string
   age: number
   gender: string
+  doctor_id: string | null
   created_at: string
 }
 
@@ -37,8 +38,8 @@ export interface Database {
       }
       patients: {
         Row: Patient
-        Insert: { patient_id?: string; name: string; age: number; gender: string }
-        Update: { name?: string; age?: number; gender?: string }
+        Insert: { patient_id?: string; name: string; age: number; gender: string; doctor_id?: string | null }
+        Update: { name?: string; age?: number; gender?: string; doctor_id?: string | null }
       }
       history: {
         Row: AnalysisHistory

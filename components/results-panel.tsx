@@ -14,7 +14,9 @@ interface ResultsPanelProps {
 
 export function ResultsPanel({ predictions, isLoading, onDiseaseClick, activeDisease, customThresholds = {} }: ResultsPanelProps) {
   const sortedPredictions = [...predictions].sort((a, b) => b.confidence - a.confidence)
-  const topVerdict = sortedPredictions.length > 0 ? sortedPredictions[0] : null
+  const positivePredictions = sortedPredictions.filter(p => p.predicted || p.confidence >= (customThresholds[p.disease] ?? p.threshold))
+  const isPatientAbnormal = positivePredictions.length > 0
+  const topVerdict = isPatientAbnormal ? positivePredictions[0] : (sortedPredictions.length > 0 ? sortedPredictions[0] : null)
 
   return (
     <div className="flex h-full flex-col gap-4 rounded-2xl bg-[#111827] border border-[#1f2937] p-6 text-slate-200">
@@ -33,16 +35,16 @@ export function ResultsPanel({ predictions, isLoading, onDiseaseClick, activeDis
           {/* Top Section */}
           <div className="flex items-center gap-4">
             <div className="flex-1">
-              <div className={`text-3xl font-bold ${topVerdict.confidence >= (customThresholds[topVerdict.disease] ?? topVerdict.threshold) ? 'text-red-500' : 'text-emerald-400'}`}>
-                {topVerdict.confidence >= (customThresholds[topVerdict.disease] ?? topVerdict.threshold) ? 'Abnormal' : 'Normal'}
+              <div className={`text-3xl font-bold ${isPatientAbnormal ? 'text-red-500' : 'text-emerald-400'}`}>
+                {isPatientAbnormal ? 'Abnormal' : 'Normal'}
               </div>
               <div className="mt-2 text-sm text-slate-400">Confidence Score</div>
-              <div className={`text-5xl font-bold ${topVerdict.confidence >= (customThresholds[topVerdict.disease] ?? topVerdict.threshold) ? 'text-red-500' : 'text-emerald-400'}`}>
+              <div className={`text-5xl font-bold ${isPatientAbnormal ? 'text-red-500' : 'text-emerald-400'}`}>
                 {(topVerdict.confidence * 100).toFixed(0)}%
               </div>
               <Progress 
                 value={topVerdict.confidence * 100} 
-                className={`mt-4 h-3 ${topVerdict.confidence >= (customThresholds[topVerdict.disease] ?? topVerdict.threshold) ? '[&>div]:bg-red-500 bg-red-950/50 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : '[&>div]:bg-emerald-500 bg-emerald-950/50'}`} 
+                className={`mt-4 h-3 ${isPatientAbnormal ? '[&>div]:bg-red-500 bg-red-950/50 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : '[&>div]:bg-emerald-500 bg-emerald-950/50'}`} 
               />
             </div>
             <div className="flex h-32 w-32 items-center justify-center rounded-xl bg-[#0a0f1c] border border-[#1f2937]">
