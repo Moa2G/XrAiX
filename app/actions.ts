@@ -193,15 +193,27 @@ export async function getAnalysisStats() {
   const supabaseAdmin = await createAdminClient()
   const role = (session.profile as any)?.role
 
-  if (role === 'admin') {
-    const { count: total } = await supabaseAdmin.from('history').select('*', { count: 'exact', head: true })
-    const { count: abnormal } = await supabaseAdmin.from('history').select('*', { count: 'exact', head: true }).neq('top_finding', 'Normal')
-    return { total: total || 0, abnormal: abnormal || 0 }
-  } else {
-    const { count: total } = await supabaseAdmin.from('history').select('*', { count: 'exact', head: true }).eq('doctor_id', session.id)
-    const { count: abnormal } = await supabaseAdmin.from('history').select('*', { count: 'exact', head: true }).eq('doctor_id', session.id).neq('top_finding', 'Normal')
-    return { total: total || 0, abnormal: abnormal || 0 }
+  let query = supabaseAdmin.from('history').select('top_finding')
+  if (role !== 'admin') {
+    query = query.eq('doctor_id', session.id)
   }
+
+  const { data } = await query
+  const historyData = data as any[] | null
+  
+  const total = historyData?.length || 0
+  const abnormal = historyData?.filter(row => row.top_finding !== 'Normal').length || 0
+  
+  const topDiseases: Record<string, number> = {}
+  if (historyData) {
+    historyData.forEach(row => {
+      if (row.top_finding !== 'Normal') {
+        topDiseases[row.top_finding] = (topDiseases[row.top_finding] || 0) + 1
+      }
+    })
+  }
+
+  return { total, abnormal, topDiseases }
 }
 
 export async function getAllUsers() {

@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'doctor'
+export type UserRole = 'admin' | 'doctor' | 'guest'
 
 export interface User {
   id: string

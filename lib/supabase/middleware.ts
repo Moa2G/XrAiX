@@ -33,8 +33,9 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   const isLoginPage = request.nextUrl.pathname.startsWith('/login')
+  const isGuest = request.cookies.get('guest_mode')?.value === 'true'
 
-  if (!user && !isLoginPage) {
+  if (!user && !isLoginPage && !isGuest) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)

@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic'
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import { BrainCircuit, Loader2, Lock, Mail, ShieldCheck } from 'lucide-react'
+import { BrainCircuit, Loader2, Lock, Mail, ShieldCheck, User } from 'lucide-react'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -37,6 +37,14 @@ export default function LoginPage() {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const handleGuestLogin = () => {
+    // Purely client-side: set localStorage + a cookie for the middleware/server
+    localStorage.setItem('isGuest', 'true')
+    document.cookie = 'guest_mode=true; path=/'
+    router.push('/')
+    router.refresh()
   }
 
   return (
@@ -109,6 +117,25 @@ export default function LoginPage() {
                 <ShieldCheck className="h-5 w-5" />
               )}
               {isLoading ? 'Authenticating...' : 'Secure Login'}
+            </button>
+            
+            <div className="relative mt-4">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-[#1f2937]" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-[#111827] px-2 text-slate-500">Or continue as visitor</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleGuestLogin}
+              disabled={isLoading}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#1f2937] bg-[#0a0f1c] px-4 py-3 font-semibold text-slate-300 transition-all hover:border-blue-500/50 hover:bg-blue-500/10 hover:text-blue-400 disabled:opacity-50 cursor-pointer"
+            >
+              <User className="h-5 w-5" />
+              Login as Guest
             </button>
           </form>
         </div>

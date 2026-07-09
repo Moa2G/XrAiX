@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis } from 'recharts'
 import { ResultsPanel } from './results-panel'
 import { createClient } from '@/lib/supabase/client'
 import { findPatientById, createPatient, logAnalysisHistory, createDoctorAccount, getAllUsers, updateDoctorAccount, deleteDoctorAccount, getPatientsList, getRecentAnalyses, getAnalysisStats } from '@/app/actions'
@@ -45,6 +45,7 @@ export function Dashboard({ user }: DashboardProps) {
   const [isLoadingHeatmap, setIsLoadingHeatmap] = useState(false)
   const [activeNav, setActiveNav] = useState('Dashboard')
   const [selectedDisease, setSelectedDisease] = useState<string | null>(null)
+  const [heatmapOpacity, setHeatmapOpacity] = useState(0.5)
 
   // Multi-Model and Analytics State
   const [individualHeatmaps, setIndividualHeatmaps] = useState<Record<string, string>>({})
@@ -67,7 +68,7 @@ export function Dashboard({ user }: DashboardProps) {
 
   // Dashboard DB Widgets State
   const [recentAnalyses, setRecentAnalyses] = useState<any[]>([])
-  const [stats, setStats] = useState({ total: 0, abnormal: 0 })
+  const [stats, setStats] = useState({ total: 0, abnormal: 0, topDiseases: {} as Record<string, number> })
 
   // Patient History Tab State
   const [patientsList, setPatientsList] = useState<any[]>([])
@@ -90,9 +91,10 @@ export function Dashboard({ user }: DashboardProps) {
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const supabase = createClient()
+  const isGuest = user?.profile?.role === 'guest'
 
   useEffect(() => {
-    fetchDashboardWidgets()
+    if (!isGuest) fetchDashboardWidgets()
   }, [])
 
   const fetchDashboardWidgets = async () => {
@@ -123,6 +125,7 @@ export function Dashboard({ user }: DashboardProps) {
 
   // Handle Tab Switch Hook
   useEffect(() => {
+    if (isGuest) return
     if (activeNav === 'Patient History') {
       loadPatientsList()
     }
@@ -179,6 +182,8 @@ export function Dashboard({ user }: DashboardProps) {
       setIndividualHeatmaps({})
       setIndividualPredictions({})
       setCustomThresholds({})
+      setIsRediagnose(false)
+      setExistingImageUrl(null)
     }
     reader.readAsDataURL(file)
   }
@@ -193,7 +198,7 @@ export function Dashboard({ user }: DashboardProps) {
   const handleRunDiagnostics = async () => {
     if (!uploadedImage) return
 
-    if (!patientData && !isNewPatient) {
+    if (!isGuest && !patientData && !isNewPatient) {
       alert("Please link a Patient ID or register a New Patient before analyzing.")
       return
     }
@@ -218,6 +223,8 @@ export function Dashboard({ user }: DashboardProps) {
 
       // For rediagnosis: fetch the raw, unaltered blob directly from ImageKit URL
       // For new uploads: use the base64 data URI from the file reader
+      formData.append('is_guest', isGuest ? 'true' : 'false')
+      
       if (isRediagnose && existingImageUrl) {
         const rawImageUrl = existingImageUrl.includes('?')
           ? `${existingImageUrl}&tr=orig-true`
@@ -268,15 +275,15 @@ export function Dashboard({ user }: DashboardProps) {
       }
       setCustomThresholds(newThresholds)
 
-      // Always log to database on every analysis, including rediagnosis
-      if (activePatientId) {
+      // Always log to database on every analysis, including rediagnosis (unless guest)
+      if (activePatientId && !isGuest) {
         await logAnalysisHistory({
           patient_id: activePatientId,
           doctor_id: user.profile ? user.id : null,
           image_url: data.image_url,
           top_finding: topFinding,
           confidence_score: topConf,
-          raw_predictions: data.individual_predictions || {}
+          raw_predictions: data.predictions || [] // Use mapped predictions for Multi-Label
         })
         fetchDashboardWidgets()
       }
@@ -337,7 +344,13 @@ export function Dashboard({ user }: DashboardProps) {
   }
 
   const handleLogout = async () => {
-    await supabase.auth.signOut()
+    if (user?.profile?.role === 'guest') {
+      // Purely client-side cleanup
+      localStorage.removeItem('isGuest')
+      document.cookie = 'guest_mode=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT'
+    } else {
+      await supabase.auth.signOut()
+    }
     window.location.href = '/login'
   }
 
@@ -475,7 +488,7 @@ export function Dashboard({ user }: DashboardProps) {
                   <div className="relative flex-1 bg-black/40 flex items-center justify-center">
                     <img src={uploadedImage} alt="Base" className="w-full h-full object-contain p-3" />
                     {gradCamOverlay && (
-                      <img src={gradCamOverlay} alt="Grad-CAM Overlay" className="absolute inset-0 z-10 w-full h-full object-contain p-3" />
+                      <img src={gradCamOverlay} alt="Grad-CAM Overlay" className="absolute inset-0 z-10 w-full h-full object-contain p-3" style={{ opacity: heatmapOpacity }} />
                     )}
                     {isLoadingHeatmap && (
                       <div className="absolute inset-0 flex items-center justify-center bg-[#0a0f1c]/60 backdrop-blur-sm z-30">
@@ -488,6 +501,9 @@ export function Dashboard({ user }: DashboardProps) {
                     <span className="text-[10px] text-slate-500 uppercase tracking-wider">Low</span>
                     <div className="flex-1 h-2 rounded-full" style={{ background: 'linear-gradient(to right, #3b82f6, #22c55e, #eab308, #ef4444)' }} />
                     <span className="text-[10px] text-slate-500 uppercase tracking-wider">High</span>
+                    <div className="h-4 w-px bg-[#1f2937] mx-2" />
+                    <span className="text-[10px] text-slate-500 uppercase tracking-wider">Opacity</span>
+                    <input type="range" min="0" max="1" step="0.05" value={heatmapOpacity} onChange={(e) => setHeatmapOpacity(parseFloat(e.target.value))} className="w-24 accent-blue-500 cursor-pointer" />
                   </div>
                 </div>
               </div>
@@ -552,18 +568,18 @@ export function Dashboard({ user }: DashboardProps) {
 
           <div className="rounded-xl border border-[#1f2937] bg-[#111827] p-5 flex flex-col">
             <h3 className="text-xs font-bold tracking-wider text-slate-400 mb-4">STATISTICS OVERVIEW</h3>
-            <div className="flex-1 grid grid-cols-2 gap-2 mb-2">
-              <div className="bg-[#0a0f1c] rounded-lg p-3 border border-[#1f2937]">
-                <p className="text-xs text-slate-500">Total Analyses</p>
-                <p className="text-xl font-bold text-white">{stats.total}</p>
+            <div className="shrink-0 grid grid-cols-2 gap-2 mb-4">
+              <div className="bg-[#0a0f1c] rounded-lg p-2 border border-[#1f2937]">
+                <p className="text-[10px] uppercase text-slate-500">Total Analyses</p>
+                <p className="text-lg font-bold text-white">{stats.total}</p>
               </div>
-              <div className="bg-[#0a0f1c] rounded-lg p-3 border border-[#1f2937]">
-                <p className="text-xs text-slate-500">Abnormal Cases</p>
-                <p className="text-xl font-bold text-red-400">{stats.abnormal}</p>
+              <div className="bg-[#0a0f1c] rounded-lg p-2 border border-[#1f2937]">
+                <p className="text-[10px] uppercase text-slate-500">Abnormal</p>
+                <p className="text-lg font-bold text-red-400">{stats.abnormal}</p>
               </div>
             </div>
             
-            <div className="w-full h-[120px] relative">
+            <div className="flex-1 w-full min-h-[120px] relative">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -607,9 +623,11 @@ export function Dashboard({ user }: DashboardProps) {
               >
                 <Upload className="h-4 w-4 text-blue-400" /> Upload New X-Ray
               </button>
-              <button onClick={() => setActiveNav('Patient History')} className="flex items-center gap-3 rounded-lg border border-[#1f2937] bg-[#0a0f1c] p-3 text-sm text-slate-300 hover:border-blue-500/50 hover:bg-blue-500/10 transition-colors cursor-pointer">
-                <History className="h-4 w-4 text-blue-400" /> View History
-              </button>
+              {!isGuest && (
+                <button onClick={() => setActiveNav('Patient History')} className="flex items-center gap-3 rounded-lg border border-[#1f2937] bg-[#0a0f1c] p-3 text-sm text-slate-300 hover:border-blue-500/50 hover:bg-blue-500/10 transition-colors cursor-pointer">
+                  <History className="h-4 w-4 text-blue-400" /> View History
+                </button>
+              )}
               <button onClick={() => setActiveNav('Analytics')} className="flex items-center gap-3 rounded-lg border border-[#1f2937] bg-[#0a0f1c] p-3 text-sm text-slate-300 hover:border-blue-500/50 hover:bg-blue-500/10 transition-colors cursor-pointer">
                 <BarChart2 className="h-4 w-4 text-blue-400" /> View Analytics
               </button>
@@ -630,12 +648,83 @@ export function Dashboard({ user }: DashboardProps) {
     </div>
   )
 
-  const renderPatientHistoryTab = () => (
-    <div className="flex h-full gap-8">
-      {/* Patient List */}
-      <div className="w-1/3 rounded-2xl border border-[#1f2937] bg-[#111827] p-6 flex flex-col">
-        <h2 className="text-xl font-bold text-white mb-6">Patient Registry</h2>
-        <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+  const renderPatientHistoryTab = () => {
+    const maleCount = patientsList.filter(p => p.gender === 'Male').length
+    const femaleCount = patientsList.filter(p => p.gender === 'Female').length
+    const totalGender = maleCount + femaleCount
+    const malePct = totalGender > 0 ? Math.round((maleCount / totalGender) * 100) : 0
+    const femalePct = totalGender > 0 ? Math.round((femaleCount / totalGender) * 100) : 0
+
+    const ageUnder30 = patientsList.filter(p => p.age < 30).length
+    const age30to50 = patientsList.filter(p => p.age >= 30 && p.age <= 50).length
+    const ageOver50 = patientsList.filter(p => p.age > 50).length
+    const totalAge = ageUnder30 + age30to50 + ageOver50
+    const under30Pct = totalAge > 0 ? Math.round((ageUnder30 / totalAge) * 100) : 0
+    const to50Pct = totalAge > 0 ? Math.round((age30to50 / totalAge) * 100) : 0
+    const over50Pct = totalAge > 0 ? Math.round((ageOver50 / totalAge) * 100) : 0
+
+    const topDiseasesEntries = Object.entries(stats.topDiseases || {}).sort((a, b) => b[1] - a[1]).slice(0, 3)
+
+    return (
+      <div className="flex flex-col h-full gap-6">
+        {/* Analytics Top Bar */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 shrink-0">
+          <div className="rounded-2xl border border-[#1f2937] bg-[#111827] p-4 flex flex-col justify-center">
+            <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Gender Breakdown</h3>
+            <div className="w-full h-12">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={[{ name: 'Gender', Male: maleCount, Female: femaleCount }]} layout="vertical" margin={{top: 0, right: 0, left: 0, bottom: 0}}>
+                  <XAxis type="number" hide />
+                  <YAxis dataKey="name" type="category" hide />
+                  <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ backgroundColor: '#0a0f1c', borderColor: '#1f2937', borderRadius: '8px', fontSize: '12px', color: '#f1f5f9' }} />
+                  <Bar dataKey="Male" stackId="a" fill="#60a5fa" radius={[4, 0, 0, 4]} barSize={24} />
+                  <Bar dataKey="Female" stackId="a" fill="#f472b6" radius={[0, 4, 4, 0]} barSize={24} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="flex justify-center gap-4 text-[10px] mt-2">
+              <span className="flex items-center gap-1"><div className="w-2 h-2 rounded bg-blue-400"/>Male ({maleCount}) - {malePct}%</span>
+              <span className="flex items-center gap-1"><div className="w-2 h-2 rounded bg-pink-400"/>Female ({femaleCount}) - {femalePct}%</span>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-[#1f2937] bg-[#111827] p-4 flex flex-col justify-center">
+            <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Age Distribution</h3>
+            <div className="w-full h-12">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={[{ name: 'Age', '< 30': ageUnder30, '30-50': age30to50, '> 50': ageOver50 }]} layout="vertical" margin={{top: 0, right: 0, left: 0, bottom: 0}}>
+                  <XAxis type="number" hide />
+                  <YAxis dataKey="name" type="category" hide />
+                  <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ backgroundColor: '#0a0f1c', borderColor: '#1f2937', borderRadius: '8px', fontSize: '12px', color: '#f1f5f9' }} />
+                  <Bar dataKey="< 30" stackId="a" fill="#64748b" radius={[4, 0, 0, 4]} barSize={24} />
+                  <Bar dataKey="30-50" stackId="a" fill="#94a3b8" barSize={24} />
+                  <Bar dataKey="> 50" stackId="a" fill="#cbd5e1" radius={[0, 4, 4, 0]} barSize={24} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="flex justify-center gap-4 text-[10px] mt-2">
+              <span className="flex items-center gap-1"><div className="w-2 h-2 rounded bg-[#64748b]"/>&lt; 30 ({ageUnder30}) - {under30Pct}%</span>
+              <span className="flex items-center gap-1"><div className="w-2 h-2 rounded bg-[#94a3b8]"/>30-50 ({age30to50}) - {to50Pct}%</span>
+              <span className="flex items-center gap-1"><div className="w-2 h-2 rounded bg-[#cbd5e1]"/>&gt; 50 ({ageOver50}) - {over50Pct}%</span>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-[#1f2937] bg-[#111827] p-4 flex flex-col justify-center">
+            <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Top Detected Diseases</h3>
+            <div className="flex flex-col gap-1 justify-center h-16">
+              {topDiseasesEntries.length > 0 ? topDiseasesEntries.map(([disease, count]) => (
+                <div key={disease} className="flex justify-between items-center text-sm">
+                  <span className="text-slate-300 truncate w-2/3">{disease}</span>
+                  <span className="text-red-400 font-bold">{count} cases</span>
+                </div>
+              )) : <span className="text-sm text-slate-500">No data available</span>}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-1 min-h-0 gap-8">
+          {/* Patient List */}
+          <div className="w-1/3 rounded-2xl border border-[#1f2937] bg-[#111827] p-6 flex flex-col">
+            <h2 className="text-xl font-bold text-white mb-6">Patient Registry</h2>
+            <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
           {patientsList.map(pat => (
             <button
               key={pat.patient_id}
@@ -697,25 +786,46 @@ export function Dashboard({ user }: DashboardProps) {
               </button>
             </div>
             <div className="space-y-6">
-              {selectedPatientHistory.map((hist: any) => (
-                <div key={hist.analysis_id} className="rounded-xl border border-[#1f2937] bg-[#0a0f1c] p-4 flex gap-4 items-center">
-                  {hist.image_url ? (
-                    <img src={`${hist.image_url}?tr=w-64,h-64,fo-auto`} alt="X-Ray" className="w-16 h-16 rounded-lg object-cover border border-[#1f2937]" />
-                  ) : (
-                    <div className="w-16 h-16 rounded-lg bg-[#1f2937] flex items-center justify-center text-slate-500">
-                      <ImageIcon className="w-6 h-6" />
+              {selectedPatientHistory.map((hist: any) => {
+                let positiveLabels: string[] = []
+                
+                // Parse raw_predictions if it exists and is mapped array
+                if (hist.raw_predictions && Array.isArray(hist.raw_predictions)) {
+                  positiveLabels = hist.raw_predictions
+                    .filter((p: any) => p.predicted || p.confidence >= p.threshold)
+                    .map((p: any) => p.disease)
+                }
+
+                if (positiveLabels.length === 0) {
+                  positiveLabels = [hist.top_finding]
+                }
+
+                return (
+                  <div key={hist.analysis_id} className="rounded-xl border border-[#1f2937] bg-[#0a0f1c] p-4 flex gap-4 items-center">
+                    {hist.image_url ? (
+                      <img src={`${hist.image_url}?tr=w-64,h-64,fo-auto`} alt="X-Ray" className="w-16 h-16 rounded-lg object-cover border border-[#1f2937]" />
+                    ) : (
+                      <div className="w-16 h-16 rounded-lg bg-[#1f2937] flex items-center justify-center text-slate-500">
+                        <ImageIcon className="w-6 h-6" />
+                      </div>
+                    )}
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-slate-300">{new Date(hist.created_at).toLocaleString()}</p>
+                      <p className="text-xs text-slate-500 mt-1">Doctor ID: {hist.doctor_id}</p>
                     </div>
-                  )}
-                  <div className="flex-1">
-                    <p className="text-sm font-semibold text-slate-300">{new Date(hist.created_at).toLocaleString()}</p>
-                    <p className="text-xs text-slate-500 mt-1">Doctor ID: {hist.doctor_id}</p>
+                    <div className="text-right max-w-[250px]">
+                      <div className="flex flex-wrap justify-end gap-1 mb-1">
+                        {positiveLabels.map(label => (
+                          <span key={label} className={`text-[10px] px-1.5 py-0.5 rounded font-bold border uppercase tracking-wider ${label !== 'Normal' ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'}`}>
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-sm text-slate-400">Top Confidence: {(hist.confidence_score * 100).toFixed(1)}%</p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className={`text-lg font-bold ${hist.top_finding !== 'Normal' ? 'text-red-400' : 'text-emerald-400'}`}>{hist.top_finding}</p>
-                    <p className="text-sm text-slate-400">Confidence: {(hist.confidence_score * 100).toFixed(1)}%</p>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
               {selectedPatientHistory.length === 0 && <p className="text-slate-500">No analyses recorded for this patient.</p>}
             </div>
           </>
@@ -726,7 +836,9 @@ export function Dashboard({ user }: DashboardProps) {
         )}
       </div>
     </div>
+    </div>
   )
+  }
 
   const renderSettingsTab = () => (
     <div className="flex flex-col gap-8 max-w-4xl mx-auto w-full h-full overflow-y-auto pb-10 custom-scrollbar">
@@ -855,9 +967,22 @@ export function Dashboard({ user }: DashboardProps) {
     }
     return (
       <div className="flex flex-col gap-6 h-full overflow-y-auto custom-scrollbar">
-        <div>
-          <h2 className="text-2xl font-bold text-white mb-2">Multi-Model Vision Analysis</h2>
-          <p className="text-slate-400">Compare individual Grad-CAM heatmaps from all ensemble architectures.</p>
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+          <div>
+            <h2 className="text-2xl font-bold text-white mb-2">Multi-Model Vision Analysis</h2>
+            <p className="text-slate-400">Compare individual Grad-CAM heatmaps from all ensemble architectures.</p>
+          </div>
+          
+          <div className="flex items-center bg-[#111827] rounded-xl border border-[#1f2937] shadow-xl overflow-hidden w-full md:w-auto mt-2 md:mt-0">
+            <div className="px-6 py-4 flex flex-1 items-center gap-4">
+              <span className="text-[10px] text-slate-500 uppercase tracking-wider">Low</span>
+              <div className="w-24 md:w-48 h-2 rounded-full" style={{ background: 'linear-gradient(to right, #3b82f6, #22c55e, #eab308, #ef4444)' }} />
+              <span className="text-[10px] text-slate-500 uppercase tracking-wider">High</span>
+              <div className="h-6 w-px bg-[#1f2937] mx-2" />
+              <span className="text-[10px] text-slate-500 uppercase tracking-wider">Opacity</span>
+              <input type="range" min="0" max="1" step="0.01" value={heatmapOpacity} onChange={(e) => setHeatmapOpacity(parseFloat(e.target.value))} className="flex-1 w-32 md:w-64 accent-blue-500 cursor-pointer" />
+            </div>
+          </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {heatmaps.map(([model, base64]) => (
@@ -868,7 +993,7 @@ export function Dashboard({ user }: DashboardProps) {
               </div>
               <div className="relative aspect-square bg-black p-4 flex items-center justify-center">
                 {uploadedImage && <img src={uploadedImage} className="absolute inset-0 w-full h-full object-contain p-4" alt="Original" />}
-                {base64 && <img src={base64} className="absolute inset-0 z-10 w-full h-full object-contain p-4" alt={`${model} Heatmap`} />}
+                {base64 && <img src={base64} className="absolute inset-0 z-10 w-full h-full object-contain p-4" alt={`${model} Heatmap`} style={{ opacity: heatmapOpacity }} />}
               </div>
             </div>
           ))}
@@ -948,19 +1073,25 @@ export function Dashboard({ user }: DashboardProps) {
               { name: 'Patient History', icon: History },
               { name: 'Analytics', icon: BarChart2 },
               { name: 'Settings', icon: Settings },
-            ].map((item) => (
-              <button
-                key={item.name}
-                onClick={() => setActiveNav(item.name)}
-                className={`flex w-full items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors ${activeNav === item.name
-                    ? 'bg-blue-500/10 text-blue-400 shadow-[inset_4px_0_0_0_rgba(59,130,246,0.8)]'
-                    : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
-                  }`}
-              >
-                <item.icon className="h-5 w-5" />
-                {item.name}
-              </button>
-            ))}
+            ].map((item) => {
+              // Hide History and Settings from Guests
+              if (user.profile?.role === 'guest' && (item.name === 'Patient History' || item.name === 'Settings')) {
+                return null;
+              }
+              return (
+                <button
+                  key={item.name}
+                  onClick={() => setActiveNav(item.name)}
+                  className={`flex w-full items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors ${activeNav === item.name
+                      ? 'bg-blue-500/10 text-blue-400 shadow-[inset_4px_0_0_0_rgba(59,130,246,0.8)]'
+                      : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+                    }`}
+                >
+                  <item.icon className="h-5 w-5" />
+                  {item.name}
+                </button>
+              )
+            })}
           </nav>
         </div>
 
@@ -1020,10 +1151,14 @@ export function Dashboard({ user }: DashboardProps) {
               </div>
               {showUserMenu && (
                 <div className="absolute right-0 top-14 z-50 w-48 rounded-xl border border-[#1f2937] bg-[#111827] shadow-2xl overflow-hidden">
-                  <button onClick={() => { setActiveNav('Settings'); setShowUserMenu(false) }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-[#0a0f1c] hover:text-white transition-colors cursor-pointer">
-                    <Settings className="h-4 w-4 text-slate-400" /> Settings
-                  </button>
-                  <div className="border-t border-[#1f2937]" />
+                  {!isGuest && (
+                    <>
+                      <button onClick={() => { setActiveNav('Settings'); setShowUserMenu(false) }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-[#0a0f1c] hover:text-white transition-colors cursor-pointer">
+                        <Settings className="h-4 w-4 text-slate-400" /> Settings
+                      </button>
+                      <div className="border-t border-[#1f2937]" />
+                    </>
+                  )}
                   <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer">
                     <LogOut className="h-4 w-4" /> Sign Out
                   </button>

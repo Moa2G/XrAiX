@@ -7,6 +7,7 @@ export async function POST(request: NextRequest) {
     const image = formData.get('image') as File
     const targetDisease = formData.get('target_disease') as string | null
     const skipUpload = formData.get('skip_upload') === 'true'
+    const isGuest = formData.get('is_guest') === 'true'
     const existingImageUrl = formData.get('existing_image_url') as string | null
 
     if (!image) {
@@ -30,11 +31,11 @@ export async function POST(request: NextRequest) {
       backendFormData.append('target_disease', targetDisease);
     }
     
-    // 4. Forward to backend. Conditionally upload to ImageKit (skip on rediagnose)
+    // 4. Forward to backend. Conditionally upload to ImageKit (skip on rediagnose or if guest)
     let imageKitPromise: Promise<{ url: string | null }>;
-    if (skipUpload && existingImageUrl) {
-      // Rediagnose: skip ImageKit upload, reuse existing URL
-      imageKitPromise = Promise.resolve({ url: existingImageUrl });
+    if ((skipUpload && existingImageUrl) || isGuest) {
+      // Rediagnose or Guest: skip ImageKit upload
+      imageKitPromise = Promise.resolve({ url: existingImageUrl || null });
     } else {
       imageKitPromise = imagekit.upload({
         file: buffer,
